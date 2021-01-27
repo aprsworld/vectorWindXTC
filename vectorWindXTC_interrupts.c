@@ -61,8 +61,9 @@ void serial_isr_wireless(void) {
 #define GNSS_STATE_IN      1
 
 
-#define GNSS_SENTENCE_GGA  0
-#define GNSS_SENTENCE_HDT  1
+
+#define GNSS_SENTENCE_HDT  0
+#define GNSS_SENTENCE_GGA  1
 
 
 #int_rda
@@ -71,6 +72,7 @@ void serial_isr_gnss(void) {
 	static int8 gnss_sentence_index=0;
 	int8 c;
 	int8 buff[6];
+	int8 pos;
 
 	if ( GNSS_STATE_WAITING == gnss_state ) {
 		buff[0]=buff[1];            // '$'
@@ -85,11 +87,11 @@ void serial_isr_gnss(void) {
 				/* got a $xxGGA sentence start */ 
 				gnss_sentence_index=GNSS_SENTENCE_GGA;
 				gnss_state=GNSS_STATE_IN;
-				action.now_gga_start=1;
 			} else if ( 'H'==buff[3] && 'D'==buff[4] && 'T'==buff[5] ) {
 				/* got a $xxHDT sentence start */
 				gnss_sentence_index=GNSS_SENTENCE_HDT;
 				gnss_state=GNSS_STATE_IN;
+				action.now_hdt_start=1;
 			}
 
 			if ( GNSS_STATE_IN==gnss_state ) {
@@ -99,8 +101,9 @@ void serial_isr_gnss(void) {
 				current.gnss_sentence[gnss_sentence_index][2]=buff[3];
 				current.gnss_sentence[gnss_sentence_index][3]=buff[4];
 				current.gnss_sentence[gnss_sentence_index][4]=buff[5];
+				current.gnss_sentence[gnss_sentence_index][5]='\0';
 
-				current.gnss_sentence_pos[gnss_sentence_index]=5;
+				pos=5;
 
 				current.gnss_sentence_age[gnss_sentence_index]=0;
 			}
@@ -115,7 +118,6 @@ void serial_isr_gnss(void) {
 			/* got the end of the sentence. If there are any more trailing characters (ie '\r' or '\n' they will
 			get skipped because GNSS_STATE_WAITING needs to start with a '$' */
 			gnss_state = GNSS_STATE_WAITING;
-			current.gnss_sentence[gnss_sentence_index][current.gnss_sentence_pos]='\0';
 
 			if ( GNSS_SENTENCE_HDT == gnss_sentence_index ) {
 				action.now_hdt_done=1;
@@ -124,8 +126,14 @@ void serial_isr_gnss(void) {
 			return;
 		}
 
+		if ( pos < (LEN_GNSS_SENTENCE-2) ) {
+			/* add our received character if we have room. If not, sentence was already null
+			terminated so we are good to go with truncated sentence */
+			current.gnss_sentence[gnss_sentence_index][pos]=c;
+			pos++;
+			/* always null terminate */
+			current.gnss_sentence[gnss_sentence_index][pos]='\0';
+		}
 
-		current.gnss_sentence[gnss_sentence_index][current.gnss_sentence_pos]=c;
-		current.gnss_sentence_pos[gnss_sentence_index]++;
 	}
 }

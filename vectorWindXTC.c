@@ -5,7 +5,7 @@
 
 
 #define N_GNSS_SENTENCE   2  /* how many GNSS sentences we support */
-#define LEN_GNSS_SENTENCE 80 /* maximum GNSS setence length */
+#define LEN_GNSS_SENTENCE 80 /* maximum GNSS setence length to store, less $xxXXX,*/
 
 
 typedef struct {
@@ -20,7 +20,6 @@ typedef struct {
 
 
 	int8 gnss_sentence[N_GNSS_SENTENCE][LEN_GNSS_SENTENCE];
-	int8 gnss_sentence_pos[N_GNSS_SENTENCE];
 	int8 gnss_sentence_age[N_GNSS_SENTENCE]; /* 10 mS */
 
 
@@ -33,7 +32,7 @@ typedef struct {
 
 
 typedef struct {
-	short now_gga_start;
+	short now_hdt_start;
 	short now_hdt_done;
 	short now_10millisecond;
 
@@ -87,6 +86,7 @@ void task_10millisecond(void) {
 
 
 void init() {
+	int8 i;
 //	setup_oscillator(OSC_8MHZ | OSC_INTRC);
 	setup_adc(ADC_CLOCK_INTERNAL);
 	setup_adc_ports(sAN0 | sAN1 | sAN2 | VSS_VREF );
@@ -111,13 +111,18 @@ void init() {
 //	port_b_pullups(TRUE);
 	delay_ms(14);
 
-	action.now_gga_start=0;
+	action.now_hdt_start=0;
 	action.now_hdt_done=0;
 	action.now_10millisecond=0;
 
 	current.pulse_period=0;
 	current.pulse_min_period=65535;
 	current.pulse_count=0;
+
+	for ( i=0 ; i < N_GNSS_SENTENCE ; i++ ) {
+		current.gnss_sentence[i][0]='\0';
+		current.gnss_sentence_age[i]=0;
+	}
 	
 }
 
@@ -152,7 +157,7 @@ void main(void) {
 		restart_wdt();
 		m++;
 
-#if 1
+#if 0
 		if ( current.gnss_sentence_age[GNSS_SENTENCE_GGA] >= 120 ) {
 			/* didn't get a $xxGGA sentence from GNSS for last 1.2 seconds. Send data anyhow */
 			current.gnss_sentence_age[GNSS_SENTENCE_GGA]=0;
@@ -161,8 +166,8 @@ void main(void) {
 #endif
 
 		/* as soon as interrupt flags a $xxGGA we save our data */	
-		if ( action.now_gga_start ) {
-			action.now_gga_start=0;
+		if ( action.now_hdt_start ) {
+			action.now_hdt_start=0;
 
 			disable_interrupts(GLOBAL);
 			/* save (strobe) our data */
@@ -179,13 +184,13 @@ void main(void) {
 
 			sample_adc();
 
-			fprintf(SERIAL_XTC,"# got $xxGGA\r\n");
+			fprintf(SERIAL_XTC,"# got $xxHDT\r\n");
 		}	
 
 
-#if 1
+#if 0
 		if ( current.gnss_sentence_age[GNSS_SENTENCE_HDT] >= 125 ) {
-			/* didn't get a $xxGGA sentence from GNSS for last 1.25 seconds. Send data anyhow */
+			/* didn't get a $xxHDT sentence from GNSS for last 1.25 seconds. Send data anyhow */
 			current.gnss_sentence_age[GNSS_SENTENCE_HDT]=0;
 			action.now_hdt_done=1;
 		}
@@ -207,6 +212,15 @@ void main(void) {
 				current.vertical_anemometer_adc,
 				current.wind_vane_adc
 			);
+
+			for ( i=0 ; i < N_GNSS_SENTENCE ; i++ ) {
+				fprintf(SERIAL_XTC,"# current.gnss_sentence[%u] age=%u '%s'\r\n",
+					i,
+					current.gnss_sentence_age[i],
+					current.gnss_sentence[i]
+				);
+			}
+
 		}
 
 		/* periodic tasks */
