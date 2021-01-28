@@ -25,7 +25,7 @@
 #define NMEA0183_SENTENCE_GNGSA 18
 
 /* how many sentences we have statically allocate memory for */
-#define NMEA0183_N_SENTENCE   2   
+#define NMEA0183_N_SENTENCE   2  
 /* maximum GNSS setence length to store, less the first '$' */
 #define NMEA0183_LEN_SENTENCE 110 
 
@@ -207,7 +207,6 @@ void init() {
 	current.nmea_sentence[1].id=NMEA0183_SENTENCE_GPRMC;
 	strcpy(current.nmea_sentence[1].prefix,"GPRMC");
 
-	
 }
 
 
@@ -290,6 +289,8 @@ void main(void) {
 				current.wind_vane_adc
 			);
 
+#if 0
+/* seems to be introducing jitter */
 			for ( i=0 ; i < NMEA0183_N_SENTENCE ; i++ ) {
 				fprintf(SERIAL_XTC,"# nmea_sentence[%u] id=%u valid=%u age=%u prefix='%s' '%s'\r\n",
 					i,
@@ -300,6 +301,7 @@ void main(void) {
 					current.nmea_sentence[i].data
 				);
 			}
+#endif
 
 			current.live_age=0;
 

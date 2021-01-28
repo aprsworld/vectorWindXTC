@@ -135,6 +135,8 @@ void serial_isr_gnss(void) {
 			pos++;
 			/* always null terminate */
 			current.nmea_sentence[index].data[pos]='\0';
+		} else {
+			gnss_state = GNSS_STATE_WAITING;
 		}
 
 	}
