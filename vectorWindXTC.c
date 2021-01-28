@@ -29,6 +29,8 @@
 /* maximum GNSS setence length to store, less the first '$' */
 #define NMEA0183_LEN_SENTENCE 110 
 
+const int8 NMEA0183_TRIGGER[] = { 'G', 'P', 'H', 'D', 'T' };
+
 typedef struct {
 	int8 id;                          /* defined above */
 	int8 age;                         /* 0.010 second increments */
@@ -48,7 +50,7 @@ typedef struct {
 	int16 strobed_pulse_min_period;
 	int16 strobed_pulse_count;
 
-	struct_nmea0183_sentence nmea_sentence[NMEA0183_N_SENTENCE];
+//	struct_nmea0183_sentence nmea_sentence[NMEA0183_N_SENTENCE];
 
 
 	int16 input_voltage_adc;
@@ -61,6 +63,7 @@ typedef struct {
 
 
 typedef struct {
+	short now_nmea_raw_received;
 	short now_strobe_counters;
 	short now_gnss_trigger_start;
 	short now_gnss_trigger_done;
@@ -78,13 +81,17 @@ typedef struct {
 } struct_time_keep;
 
 
-
+typedef struct {
+	int8 buff[254];  
+	int8 pos;  
+	int8 triggered_age; // age (milliseconds) of  trigger in raw buffer
+} struct_nmea_raw;
 
 /* global structures */
 struct_current current;
 struct_action action;
 struct_time_keep timers;
-
+struct_nmea_raw nmea_raw;
 
 
 #include "vectorWindXTC_adc.c"
@@ -132,13 +139,20 @@ int8 nmea0183_is_valid(char *p) {
 }
 
 void task_10millisecond(void) {
+#if 0
 	int8 i;
+
 
 	/* age NMEA0183 sentences */
 	for ( i=0 ; i<NMEA0183_N_SENTENCE ; i++ ) {
 		if ( current.nmea_sentence[i].age < 255 ) {
 			current.nmea_sentence[i].age++;
 		}
+	}
+#endif
+
+	if ( nmea_raw.triggered_age < 255 ) {
+		nmea_raw.triggered_age++;
 	}
 
 	/* age live data timeout */
@@ -161,7 +175,7 @@ void task_10millisecond(void) {
 
 
 void init() {
-	int8 i;
+//	int8 i;
 //	setup_oscillator(OSC_8MHZ | OSC_INTRC);
 	setup_adc(ADC_CLOCK_INTERNAL);
 	setup_adc_ports(sAN0 | sAN1 | sAN2 | VSS_VREF );
@@ -181,11 +195,13 @@ void init() {
 
 	/* one periodic interrupt @ 100uS. Generated from system 8 MHz clock */
 	/* prescale=4, match=49, postscale=1. Match is 49 because when match occurs, one cycle is lost */
-	setup_timer_2(T2_DIV_BY_4,49,1); 
+//	setup_timer_2(T2_DIV_BY_4,49,1); 
+	setup_timer_2(T2_DIV_BY_16,49,1); 
 
 //	port_b_pullups(TRUE);
 	delay_ms(14);
 
+//	action.now_nmea_raw_received=0;
 	action.now_strobe_counters=0;
 	action.now_gnss_trigger_start=0;
 	action.now_gnss_trigger_done=0;
@@ -195,6 +211,7 @@ void init() {
 	current.pulse_min_period=65535;
 	current.pulse_count=0;
 
+#if 0
 	for ( i=0 ; i<NMEA0183_N_SENTENCE ; i++ ) {
 		current.nmea_sentence[i].age=255;
 		current.nmea_sentence[i].prefix[0]='\0';
@@ -208,13 +225,18 @@ void init() {
 
 	current.nmea_sentence[1].id=NMEA0183_SENTENCE_GPRMC;
 	strcpy(current.nmea_sentence[1].prefix,"GPRMC");
+#endif
 
+	nmea_raw.buff[0]='\0';
+	nmea_raw.pos=0;
+	nmea_raw.triggered_age=255;
 }
 
 
 void main(void) {
 	int8 i;
 	int16 l,m;
+//	int8 buff[sizeof(nmea_raw.buff)];
 
 	init();
 
@@ -230,7 +252,7 @@ void main(void) {
 	/* start 100uS timer */
 	enable_interrupts(INT_TIMER2);
 	/* enable serial ports */
-//	enable_interrupts(INT_RDA);
+	enable_interrupts(INT_RDA);
 	enable_interrupts(GLOBAL);
 
 	i=0;
@@ -238,7 +260,17 @@ void main(void) {
 		restart_wdt();
 		m++;
 
-#if 1
+#if 0
+		if ( action.now_nmea_raw_received ) {
+			memcpy(buff,nmea_raw.buff,sizeof(nmea_raw.buff));
+			nmea_raw.pos=0;
+			action.now_nmea_raw_received=0;
+
+			fprintf(SERIAL_XTC,"# raw='%s'\r\n",buff);
+		}
+#endif
+
+#if 0
 		if ( current.live_age >= 120 ) {
 			/* didn't get a triger sentence from GNSS for last 1.2 seconds. Send data anyhow */
 			action.now_strobe_counters=1;    /* triggers strobe of data */
@@ -262,16 +294,18 @@ void main(void) {
 			action.now_gnss_trigger_done=0;
 
 #if 1
-
 			fprintf(SERIAL_XTC,"# finished receiving trigger sentence or timeout\r\n");
 		
 			fprintf(SERIAL_XTC,"# current.live_age=%u\r\n",current.live_age);
+#endif
 
 			fprintf(SERIAL_XTC,"# {count=%lu, period=%lu, min_period=%lu}\r\n",
 				current.strobed_pulse_count,
 				current.strobed_pulse_period,
 				current.strobed_pulse_min_period
 			);
+
+#if 1
 			fprintf(SERIAL_XTC,"# {input=%lu, vertical=%lu, wind_vane=%lu}\r\n",
 				current.input_voltage_adc,
 				current.vertical_anemometer_adc,
@@ -279,7 +313,12 @@ void main(void) {
 			);
 #endif
 
-#if 1
+			fprintf(SERIAL_XTC,"# nmea_raw {triggered_age=%u '%s'}\r\n",
+				nmea_raw.triggered_age,
+				nmea_raw.buff
+			);
+
+#if 0
 /* seems to be introducing jitter */
 			for ( i=0 ; i < NMEA0183_N_SENTENCE ; i++ ) {
 				fprintf(SERIAL_XTC,"# nmea_sentence[%u] id=%u valid=%u age=%u prefix='%s' '%s'\r\n",
@@ -323,12 +362,6 @@ void main(void) {
 		}
 #endif
 
-
-
-	
-//		delay_ms(100);
-
-//		fprintf(SERIAL_XTC,"# PIN_B0=%u l=%lu m=%lu\r\n",input(PIN_B0),l,m);
 
 
 	}

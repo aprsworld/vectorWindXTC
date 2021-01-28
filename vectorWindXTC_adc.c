@@ -93,23 +93,6 @@ int16 mean_filter(int16 latest_element) {
 	return((int16)mean);
 }
 
-//-----------------------------------------------------
-void Insertion_Sort_16(int16 *data, char array_size) {
-	char i, j;
-	int16 index;
-
-	for(i = 1; i < array_size; i++) {
-		index = data[i];
-		j = i;
-		
-		while ((j > 0) && (data[j-1] > index)) {
-			data[j] = data[j-1];
-			j = j - 1;
-		}
-		
-		data[j] = index;
-	}
-}
 
 void sample_adc(void) {
 	int j;
