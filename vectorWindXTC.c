@@ -61,6 +61,7 @@ typedef struct {
 
 
 typedef struct {
+	short now_strobe_counters;
 	short now_gnss_trigger_start;
 	short now_gnss_trigger_done;
 	short now_10millisecond;
@@ -185,6 +186,7 @@ void init() {
 //	port_b_pullups(TRUE);
 	delay_ms(14);
 
+	action.now_strobe_counters=0;
 	action.now_gnss_trigger_start=0;
 	action.now_gnss_trigger_done=0;
 	action.now_10millisecond=0;
@@ -228,7 +230,7 @@ void main(void) {
 	/* start 100uS timer */
 	enable_interrupts(INT_TIMER2);
 	/* enable serial ports */
-	enable_interrupts(INT_RDA);
+//	enable_interrupts(INT_RDA);
 	enable_interrupts(GLOBAL);
 
 	i=0;
@@ -239,31 +241,16 @@ void main(void) {
 #if 1
 		if ( current.live_age >= 120 ) {
 			/* didn't get a triger sentence from GNSS for last 1.2 seconds. Send data anyhow */
-			action.now_gnss_trigger_start=1; /* triggers strobe of data */
+			action.now_strobe_counters=1;    /* triggers strobe of data */
 			action.now_gnss_trigger_done=1;  /* triggers send of data */
 			fprintf(SERIAL_XTC,"# timeout waiting for trigger\r\n");
 		}
 #endif
 
-		/* as soon as interrupt flags trigger sentence start, we save our data */	
+		/* recieving a GNSS trigger on our serial port causes counter values to be strobe. Once that
+		is complete, we sample ADCs */	
 		if ( action.now_gnss_trigger_start ) {
 			action.now_gnss_trigger_start=0;
-
-			/* turn off interrupts so data isn't changed during copy*/
-			disable_interrupts(GLOBAL);
-
-			/* save (strobe) our data */
-			current.strobed_pulse_period=current.pulse_period;
-			current.strobed_pulse_min_period=current.pulse_min_period;
-			current.strobed_pulse_count=current.pulse_count;
-
-			/* reset our data */
-			current.pulse_period=0;
-			current.pulse_min_period=65535;
-			current.pulse_count=0;
-
-			/* turn back on interrupts */
-			enable_interrupts(GLOBAL);
 
 			sample_adc();
 
@@ -273,6 +260,8 @@ void main(void) {
 		/* as soon as interrupt finishes a $xxHDT we send our data */
 		if ( action.now_gnss_trigger_done) { 
 			action.now_gnss_trigger_done=0;
+
+#if 1
 
 			fprintf(SERIAL_XTC,"# finished receiving trigger sentence or timeout\r\n");
 		
@@ -288,8 +277,9 @@ void main(void) {
 				current.vertical_anemometer_adc,
 				current.wind_vane_adc
 			);
+#endif
 
-#if 0
+#if 1
 /* seems to be introducing jitter */
 			for ( i=0 ; i < NMEA0183_N_SENTENCE ; i++ ) {
 				fprintf(SERIAL_XTC,"# nmea_sentence[%u] id=%u valid=%u age=%u prefix='%s' '%s'\r\n",

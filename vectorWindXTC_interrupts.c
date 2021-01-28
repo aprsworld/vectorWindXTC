@@ -12,6 +12,23 @@ void isr_100us(void) {
 	static short ext0_last=0;
 	static short ext0_state=0;
 
+	if ( action.now_strobe_counters ) {
+		action.now_strobe_counters=0;
+
+		/* save (strobe) our data */
+		current.strobed_pulse_period=current.pulse_period;
+		current.strobed_pulse_min_period=current.pulse_min_period;
+		current.strobed_pulse_count=current.pulse_count;
+
+		/* reset our data */
+		current.pulse_period=0;
+		current.pulse_min_period=65535;
+		current.pulse_count=0;
+
+		/* counters are copied, now we can start the rest of the measurements */
+		action.now_gnss_trigger_start=1;
+	}
+
 	/* every 100 cycles we tell main() loop to do 10 milisecond activities */
 	tick++;
 	if ( 100 == tick ) {
@@ -103,7 +120,8 @@ void serial_isr_gnss(void) {
 
 					if ( 0 == index ) {
 						/* first element is our trigger */
-						action.now_gnss_trigger_start=1;
+						//action.now_gnss_trigger_start=1;
+						action.now_strobe_counters=1;
 					}
 				
 					gnss_state=GNSS_STATE_IN;
