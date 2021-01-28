@@ -1,11 +1,41 @@
 #include "vectorWindXTC.h"
 
-#define SERIAL_PREFIX 'A'
-#define SERIAL_NUMBER 2233
+#define SERIAL_PREFIX 'R'
+#define SERIAL_NUMBER 1036
 
 
-#define N_GNSS_SENTENCE   2  /* how many GNSS sentences we support */
-#define LEN_GNSS_SENTENCE 80 /* maximum GNSS setence length to store, less $xxXXX,*/
+#define NMEA0183_SENTENCE_GPGGA 0
+#define NMEA0183_SENTENCE_GPGLL 1
+#define NMEA0183_SENTENCE_GPGNS 2
+#define NMEA0183_SENTENCE_GPGRS 3
+#define NMEA0183_SENTENCE_GPGSA 4
+#define NMEA0183_SENTENCE_GPGST 5
+#define NMEA0183_SENTENCE_GPGSV 6
+#define NMEA0183_SENTENCE_GPRMC 7
+#define NMEA0183_SENTENCE_GPRRE 8
+#define NMEA0183_SENTENCE_GPVTG 9
+#define NMEA0183_SENTENCE_GPZDA 10
+#define NMEA0183_SENTENCE_GPROT 11
+#define NMEA0183_SENTENCE_GPHEV 12
+#define NMEA0183_SENTENCE_GPHDT 13
+#define NMEA0183_SENTENCE_GPHDM 14
+#define NMEA0183_SENTENCE_GBGSV 15
+#define NMEA0183_SENTENCE_GLGSV 16
+#define NMEA0183_SENTENCE_GNGNS 17
+#define NMEA0183_SENTENCE_GNGSA 18
+
+/* how many sentences we have statically allocate memory for */
+#define NMEA0183_N_SENTENCE   2   
+/* maximum GNSS setence length to store, less the first '$' */
+#define NMEA0183_LEN_SENTENCE 110 
+
+typedef struct {
+	int8 id;                          /* defined above */
+	int8 age;                         /* 0.010 second increments */
+	int8 prefix[6];                   /* example: "GPRMC", null terminated */
+	int8 data[NMEA0183_LEN_SENTENCE]; /* data from GNSS after '$' and before '\r' or '\n', null terminated */
+} struct_nmea0183_sentence;
+
 
 
 typedef struct {
@@ -18,22 +48,21 @@ typedef struct {
 	int16 strobed_pulse_min_period;
 	int16 strobed_pulse_count;
 
-
-	int8 gnss_sentence[N_GNSS_SENTENCE][LEN_GNSS_SENTENCE];
-	int8 gnss_sentence_age[N_GNSS_SENTENCE]; /* 10 mS */
-
+	struct_nmea0183_sentence nmea_sentence[NMEA0183_N_SENTENCE];
 
 
 	int16 input_voltage_adc;
 	int16 vertical_anemometer_adc;
 	int16 wind_vane_adc;
 	int16 uptime;
+
+	int8 live_age;
 } struct_current;
 
 
 typedef struct {
-	short now_hdt_start;
-	short now_hdt_done;
+	short now_gnss_trigger_start;
+	short now_gnss_trigger_done;
 	short now_10millisecond;
 
 	/* flag to see if we are timing */
@@ -54,21 +83,66 @@ typedef struct {
 struct_current current;
 struct_action action;
 struct_time_keep timers;
-//struct_gps_data gps;
 
 
 
 #include "vectorWindXTC_adc.c"
 #include "vectorWindXTC_interrupts.c"
 
+int8 xtoi(int8 h) {
+	if ( h>='0' && h<='9' ) {
+		return h-'0';
+	}
+
+	h=toupper(h);
+	if ( h>='A' && h<='F' ) {
+		return (10 + (h-'A'));
+	}
+
+	return 0;
+}
+
+int8 nmea0183_is_valid(char *p) {
+	/* check if a string that starts after the '$' and includes the '*' checksum is valid */
+	int16 lcrc, rcrc;
+	int8 i;
+
+	lcrc=rcrc=0;
+
+	for ( i=0 ; i<NMEA0183_LEN_SENTENCE<2 ; i++ ) {
+		if ( '\0' == p[i] ) {
+			/* reached the end of the string without getting a '*' */
+			return 0;
+		}
+
+		if ( '*' == p[i] ) {
+			rcrc = 16*xtoi(p[i+1]) + xtoi(p[i+2]);
+
+			if ( rcrc == lcrc ) {
+				return 1;
+			}
+		} else {
+			lcrc = lcrc ^ p[i];
+		}
+	}
+	
+	/* should only get here if we never encounter a '*' */
+	return 0;
+}
 
 void task_10millisecond(void) {
 	int8 i;
 
-	for ( i=0 ; i<N_GNSS_SENTENCE ; i++ ) {
-		if ( current.gnss_sentence_age[i] < 255 ) {
-			current.gnss_sentence_age[i]++;
+	/* age NMEA0183 sentences */
+	for ( i=0 ; i<NMEA0183_N_SENTENCE ; i++ ) {
+		if ( current.nmea_sentence[i].age < 255 ) {
+			current.nmea_sentence[i].age++;
 		}
+	}
+
+	/* age live data timeout */
+	if ( current.live_age < 255 ) {
+		current.live_age++;
 	}
 
 	if ( current.strobed_pulse_count > 0 ) {
@@ -111,18 +185,28 @@ void init() {
 //	port_b_pullups(TRUE);
 	delay_ms(14);
 
-	action.now_hdt_start=0;
-	action.now_hdt_done=0;
+	action.now_gnss_trigger_start=0;
+	action.now_gnss_trigger_done=0;
 	action.now_10millisecond=0;
 
 	current.pulse_period=0;
 	current.pulse_min_period=65535;
 	current.pulse_count=0;
 
-	for ( i=0 ; i < N_GNSS_SENTENCE ; i++ ) {
-		current.gnss_sentence[i][0]='\0';
-		current.gnss_sentence_age[i]=0;
+	for ( i=0 ; i<NMEA0183_N_SENTENCE ; i++ ) {
+		current.nmea_sentence[i].age=255;
+		current.nmea_sentence[i].prefix[0]='\0';
+		current.nmea_sentence[i].data[0]='\0';
 	}
+
+	/* configure the sentence we want to capture */
+	/* 0 index sentence is used as the trigger */
+	current.nmea_sentence[0].id=NMEA0183_SENTENCE_GPHDT;
+	strcpy(current.nmea_sentence[0].prefix,"GPHDT");
+
+	current.nmea_sentence[1].id=NMEA0183_SENTENCE_GPRMC;
+	strcpy(current.nmea_sentence[1].prefix,"GPRMC");
+
 	
 }
 
@@ -142,34 +226,33 @@ void main(void) {
 
 	fprintf(SERIAL_XTC,"# vectorWindXTC (%s) on XTC\r\n",__DATE__);
 
-#if 1
 	/* start 100uS timer */
 	enable_interrupts(INT_TIMER2);
 	/* enable serial ports */
 	enable_interrupts(INT_RDA);
-//	enable_interrupts(INT_RDA2);
-	
 	enable_interrupts(GLOBAL);
-#endif
 
 	i=0;
 	for ( ; ; ) {
 		restart_wdt();
 		m++;
 
-#if 0
-		if ( current.gnss_sentence_age[GNSS_SENTENCE_GGA] >= 120 ) {
-			/* didn't get a $xxGGA sentence from GNSS for last 1.2 seconds. Send data anyhow */
-			current.gnss_sentence_age[GNSS_SENTENCE_GGA]=0;
-			action.now_gga_start=1;
+#if 1
+		if ( current.live_age >= 120 ) {
+			/* didn't get a triger sentence from GNSS for last 1.2 seconds. Send data anyhow */
+			action.now_gnss_trigger_start=1; /* triggers strobe of data */
+			action.now_gnss_trigger_done=1;  /* triggers send of data */
+			fprintf(SERIAL_XTC,"# timeout waiting for trigger\r\n");
 		}
 #endif
 
-		/* as soon as interrupt flags a $xxGGA we save our data */	
-		if ( action.now_hdt_start ) {
-			action.now_hdt_start=0;
+		/* as soon as interrupt flags trigger sentence start, we save our data */	
+		if ( action.now_gnss_trigger_start ) {
+			action.now_gnss_trigger_start=0;
 
+			/* turn off interrupts so data isn't changed during copy*/
 			disable_interrupts(GLOBAL);
+
 			/* save (strobe) our data */
 			current.strobed_pulse_period=current.pulse_period;
 			current.strobed_pulse_min_period=current.pulse_min_period;
@@ -180,27 +263,21 @@ void main(void) {
 			current.pulse_min_period=65535;
 			current.pulse_count=0;
 
+			/* turn back on interrupts */
 			enable_interrupts(GLOBAL);
 
 			sample_adc();
 
-			fprintf(SERIAL_XTC,"# got $xxHDT\r\n");
+			fprintf(SERIAL_XTC,"# got trigger sentence\r\n");
 		}	
 
-
-#if 0
-		if ( current.gnss_sentence_age[GNSS_SENTENCE_HDT] >= 125 ) {
-			/* didn't get a $xxHDT sentence from GNSS for last 1.25 seconds. Send data anyhow */
-			current.gnss_sentence_age[GNSS_SENTENCE_HDT]=0;
-			action.now_hdt_done=1;
-		}
-#endif
-
 		/* as soon as interrupt finishes a $xxHDT we send our data */
-		if ( action.now_hdt_done) { 
-			action.now_hdt_done=0;
+		if ( action.now_gnss_trigger_done) { 
+			action.now_gnss_trigger_done=0;
 
-			fprintf(SERIAL_XTC,"# finished $xxHDT\r\n");
+			fprintf(SERIAL_XTC,"# finished receiving trigger sentence or timeout\r\n");
+		
+			fprintf(SERIAL_XTC,"# current.live_age=%u\r\n",current.live_age);
 
 			fprintf(SERIAL_XTC,"# {count=%lu, period=%lu, min_period=%lu}\r\n",
 				current.strobed_pulse_count,
@@ -213,13 +290,18 @@ void main(void) {
 				current.wind_vane_adc
 			);
 
-			for ( i=0 ; i < N_GNSS_SENTENCE ; i++ ) {
-				fprintf(SERIAL_XTC,"# current.gnss_sentence[%u] age=%u '%s'\r\n",
+			for ( i=0 ; i < NMEA0183_N_SENTENCE ; i++ ) {
+				fprintf(SERIAL_XTC,"# nmea_sentence[%u] id=%u valid=%u age=%u prefix='%s' '%s'\r\n",
 					i,
-					current.gnss_sentence_age[i],
-					current.gnss_sentence[i]
+					current.nmea_sentence[i].id,
+					nmea0183_is_valid(current.nmea_sentence[i].data),
+					current.nmea_sentence[i].age,
+					current.nmea_sentence[i].prefix,
+					current.nmea_sentence[i].data
 				);
 			}
+
+			current.live_age=0;
 
 		}
 
@@ -231,7 +313,7 @@ void main(void) {
 
 
 
-
+#if 0
 		if ( kbhit(SERIAL_XTC) ) {
 			i=fgetc(SERIAL_XTC);
 			l++;
@@ -245,17 +327,6 @@ void main(void) {
 
 				case 'g': output_low(LED_GREEN); break;
 				case 'G': output_high(LED_GREEN); break;
-			}
-		}
-
-#if 0
-		if ( kbhit(SERIAL_GNSS) ) {
-			i=fgetc(SERIAL_GNSS);
-			l++;
-
-			switch ( i ) {
-				case '$': output_high(LED_ORANGE); break;
-				case '*': output_low(LED_ORANGE); break;
 			}
 		}
 #endif

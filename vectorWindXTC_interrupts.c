@@ -61,54 +61,56 @@ void serial_isr_wireless(void) {
 #define GNSS_STATE_IN      1
 
 
-
-#define GNSS_SENTENCE_HDT  0
-#define GNSS_SENTENCE_GGA  1
-
-
 #int_rda
 void serial_isr_gnss(void) {
 	static int1 gnss_state=0; 
-	static int8 gnss_sentence_index=0;
+	static int8 index=0;
+	static int8 pos;
+	static int8 buff[6];
 	int8 c;
-	int8 buff[6];
-	int8 pos;
+
 
 	if ( GNSS_STATE_WAITING == gnss_state ) {
+		/* FIFO */
 		buff[0]=buff[1];            // '$'
-		buff[1]=buff[2];            // (do not care)
-		buff[2]=buff[3];            // (do not care)
-		buff[3]=buff[4];            // 'G' or 'H'
-		buff[4]=buff[5];            // 'G' or 'D'
-		buff[5]=fgetc(SERIAL_GNSS); // 'A' or 'T'
+		buff[1]=buff[2];            // 'G'
+		buff[2]=buff[3];            // 'P'
+		buff[3]=buff[4];            // 'R' or 'H'
+		buff[4]=buff[5];            // 'M' or 'D'
+		buff[5]=fgetc(SERIAL_GNSS); // 'C' or 'T'
 
-		if ( '$'==buff[0] ) {
-			if ( 'G'==buff[3] && 'G'==buff[4] && 'A'==buff[5] ) {
-				/* got a $xxGGA sentence start */ 
-				gnss_sentence_index=GNSS_SENTENCE_GGA;
-				gnss_state=GNSS_STATE_IN;
-			} else if ( 'H'==buff[3] && 'D'==buff[4] && 'T'==buff[5] ) {
-				/* got a $xxHDT sentence start */
-				gnss_sentence_index=GNSS_SENTENCE_HDT;
-				gnss_state=GNSS_STATE_IN;
-				action.now_hdt_start=1;
-			}
 
-			if ( GNSS_STATE_IN==gnss_state ) {
-				/* skip '$' since it isn't used in the checksum */
-				current.gnss_sentence[gnss_sentence_index][0]=buff[1];
-				current.gnss_sentence[gnss_sentence_index][1]=buff[2];
-				current.gnss_sentence[gnss_sentence_index][2]=buff[3];
-				current.gnss_sentence[gnss_sentence_index][3]=buff[4];
-				current.gnss_sentence[gnss_sentence_index][4]=buff[5];
-				current.gnss_sentence[gnss_sentence_index][5]='\0';
+		if ( '$' != buff[0] ) {
+			return;
+		}
 
-				pos=5;
+		/* search through current.nmea_sentence[].prefixes for a match */
+		for ( index=0 ; index<NMEA0183_N_SENTENCE ; index++ ) {
+			if (  current.nmea_sentence[index].prefix[0] == buff[1] && current.nmea_sentence[index].prefix[1] == buff[2] &&	current.nmea_sentence[index].prefix[2] == buff[3] && current.nmea_sentence[index].prefix[3] == buff[4] && current.nmea_sentence[index].prefix[4] == buff[5] ) {
+					/* got a prefix match! */
+					current.nmea_sentence[index].age=0;
+			
+					output_toggle(LED_RED);
 
-				current.gnss_sentence_age[gnss_sentence_index]=0;
-			}
-		} else {
-			/* don't do anything because NMEA sentences must start with a '$' */
+					/* skip '$' since it isn't used in the checksum */
+					current.nmea_sentence[index].data[0]=buff[1];
+					current.nmea_sentence[index].data[1]=buff[2];
+					current.nmea_sentence[index].data[2]=buff[3];
+					current.nmea_sentence[index].data[3]=buff[4];
+					current.nmea_sentence[index].data[4]=buff[5];
+					current.nmea_sentence[index].data[5]='\0';
+					pos=5;
+
+					if ( 0 == index ) {
+						/* first element is our trigger */
+						action.now_gnss_trigger_start=1;
+					}
+				
+					gnss_state=GNSS_STATE_IN;
+
+					/* quit searching */
+					break;
+			}			
 		}
 	} else {
 		/* GNSS state in */
@@ -119,20 +121,20 @@ void serial_isr_gnss(void) {
 			get skipped because GNSS_STATE_WAITING needs to start with a '$' */
 			gnss_state = GNSS_STATE_WAITING;
 
-			if ( GNSS_SENTENCE_HDT == gnss_sentence_index ) {
-				action.now_hdt_done=1;
+			if ( 0 == index ) {
+				action.now_gnss_trigger_done=1;
 			}
 
 			return;
 		}
 
-		if ( pos < (LEN_GNSS_SENTENCE-2) ) {
+		if ( pos < (NMEA0183_LEN_SENTENCE-2) ) {
 			/* add our received character if we have room. If not, sentence was already null
 			terminated so we are good to go with truncated sentence */
-			current.gnss_sentence[gnss_sentence_index][pos]=c;
+			current.nmea_sentence[index].data[pos]=c;
 			pos++;
 			/* always null terminate */
-			current.gnss_sentence[gnss_sentence_index][pos]='\0';
+			current.nmea_sentence[index].data[pos]='\0';
 		}
 
 	}
