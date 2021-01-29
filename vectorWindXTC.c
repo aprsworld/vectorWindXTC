@@ -4,39 +4,9 @@
 #define SERIAL_NUMBER 1036
 
 
-#define NMEA0183_SENTENCE_GPGGA 0
-#define NMEA0183_SENTENCE_GPGLL 1
-#define NMEA0183_SENTENCE_GPGNS 2
-#define NMEA0183_SENTENCE_GPGRS 3
-#define NMEA0183_SENTENCE_GPGSA 4
-#define NMEA0183_SENTENCE_GPGST 5
-#define NMEA0183_SENTENCE_GPGSV 6
-#define NMEA0183_SENTENCE_GPRMC 7
-#define NMEA0183_SENTENCE_GPRRE 8
-#define NMEA0183_SENTENCE_GPVTG 9
-#define NMEA0183_SENTENCE_GPZDA 10
-#define NMEA0183_SENTENCE_GPROT 11
-#define NMEA0183_SENTENCE_GPHEV 12
-#define NMEA0183_SENTENCE_GPHDT 13
-#define NMEA0183_SENTENCE_GPHDM 14
-#define NMEA0183_SENTENCE_GBGSV 15
-#define NMEA0183_SENTENCE_GLGSV 16
-#define NMEA0183_SENTENCE_GNGNS 17
-#define NMEA0183_SENTENCE_GNGSA 18
 
-/* how many sentences we have statically allocate memory for */
-#define NMEA0183_N_SENTENCE   2  
-/* maximum GNSS setence length to store, less the first '$' */
-#define NMEA0183_LEN_SENTENCE 110 
 
 const int8 NMEA0183_TRIGGER[] = { 'G', 'P', 'H', 'D', 'T' };
-
-typedef struct {
-	int8 id;                          /* defined above */
-	int8 age;                         /* 0.010 second increments */
-	int8 prefix[6];                   /* example: "GPRMC", null terminated */
-	int8 data[NMEA0183_LEN_SENTENCE]; /* data from GNSS after '$' and before '\r' or '\n', null terminated */
-} struct_nmea0183_sentence;
 
 
 
@@ -50,15 +20,15 @@ typedef struct {
 	int16 strobed_pulse_min_period;
 	int16 strobed_pulse_count;
 
-//	struct_nmea0183_sentence nmea_sentence[NMEA0183_N_SENTENCE];
-
-
 	int16 input_voltage_adc;
 	int16 vertical_anemometer_adc;
 	int16 wind_vane_adc;
 	int16 uptime;
 
 	int8 live_age;
+
+	int8 gnss_age;
+	int8 gnss_buff[254];
 } struct_current;
 
 
@@ -82,9 +52,8 @@ typedef struct {
 
 
 typedef struct {
-	int8 buff[254];  
-	int8 pos;  
-	int8 triggered_age; // age (milliseconds) of  trigger in raw buffer
+	int8 buff[254];
+	int8 pos;
 } struct_nmea_raw;
 
 /* global structures */
@@ -97,62 +66,10 @@ struct_nmea_raw nmea_raw;
 #include "vectorWindXTC_adc.c"
 #include "vectorWindXTC_interrupts.c"
 
-int8 xtoi(int8 h) {
-	if ( h>='0' && h<='9' ) {
-		return h-'0';
-	}
-
-	h=toupper(h);
-	if ( h>='A' && h<='F' ) {
-		return (10 + (h-'A'));
-	}
-
-	return 0;
-}
-
-int8 nmea0183_is_valid(char *p) {
-	/* check if a string that starts after the '$' and includes the '*' checksum is valid */
-	int16 lcrc, rcrc;
-	int8 i;
-
-	lcrc=rcrc=0;
-
-	for ( i=0 ; i<NMEA0183_LEN_SENTENCE<2 ; i++ ) {
-		if ( '\0' == p[i] ) {
-			/* reached the end of the string without getting a '*' */
-			return 0;
-		}
-
-		if ( '*' == p[i] ) {
-			rcrc = 16*xtoi(p[i+1]) + xtoi(p[i+2]);
-
-			if ( rcrc == lcrc ) {
-				return 1;
-			}
-		} else {
-			lcrc = lcrc ^ p[i];
-		}
-	}
-	
-	/* should only get here if we never encounter a '*' */
-	return 0;
-}
 
 void task_10millisecond(void) {
-#if 0
-	int8 i;
-
-
-	/* age NMEA0183 sentences */
-	for ( i=0 ; i<NMEA0183_N_SENTENCE ; i++ ) {
-		if ( current.nmea_sentence[i].age < 255 ) {
-			current.nmea_sentence[i].age++;
-		}
-	}
-#endif
-
-	if ( nmea_raw.triggered_age < 255 ) {
-		nmea_raw.triggered_age++;
+	if ( current.gnss_age < 255 ) {
+		current.gnss_age++;
 	}
 
 	/* age live data timeout */
@@ -196,12 +113,16 @@ void init() {
 	/* one periodic interrupt @ 100uS. Generated from system 8 MHz clock */
 	/* prescale=4, match=49, postscale=1. Match is 49 because when match occurs, one cycle is lost */
 //	setup_timer_2(T2_DIV_BY_4,49,1); 
+
+	/* one periodic interrupt @ 100uS. Generated from system 32 MHz clock */
+	/* prescale=16, match=49, postscale=1. Match is 49 because when match occurs, one cycle is lost */
 	setup_timer_2(T2_DIV_BY_16,49,1); 
 
-//	port_b_pullups(TRUE);
+
+	/* not sure why we need this */
 	delay_ms(14);
 
-//	action.now_nmea_raw_received=0;
+
 	action.now_strobe_counters=0;
 	action.now_gnss_trigger_start=0;
 	action.now_gnss_trigger_done=0;
@@ -211,36 +132,16 @@ void init() {
 	current.pulse_min_period=65535;
 	current.pulse_count=0;
 
-#if 0
-	for ( i=0 ; i<NMEA0183_N_SENTENCE ; i++ ) {
-		current.nmea_sentence[i].age=255;
-		current.nmea_sentence[i].prefix[0]='\0';
-		current.nmea_sentence[i].data[0]='\0';
-	}
-
-	/* configure the sentence we want to capture */
-	/* 0 index sentence is used as the trigger */
-	current.nmea_sentence[0].id=NMEA0183_SENTENCE_GPHDT;
-	strcpy(current.nmea_sentence[0].prefix,"GPHDT");
-
-	current.nmea_sentence[1].id=NMEA0183_SENTENCE_GPRMC;
-	strcpy(current.nmea_sentence[1].prefix,"GPRMC");
-#endif
-
 	nmea_raw.buff[0]='\0';
 	nmea_raw.pos=0;
-	nmea_raw.triggered_age=255;
 }
 
 
 void main(void) {
 	int8 i;
-	int16 l,m;
-//	int8 buff[sizeof(nmea_raw.buff)];
+//	int16 l,m;
 
 	init();
-
-	l=m=0;
 
 	output_low(LED_ORANGE);
 	output_low(LED_RED);
@@ -258,17 +159,7 @@ void main(void) {
 	i=0;
 	for ( ; ; ) {
 		restart_wdt();
-		m++;
 
-#if 0
-		if ( action.now_nmea_raw_received ) {
-			memcpy(buff,nmea_raw.buff,sizeof(nmea_raw.buff));
-			nmea_raw.pos=0;
-			action.now_nmea_raw_received=0;
-
-			fprintf(SERIAL_XTC,"# raw='%s'\r\n",buff);
-		}
-#endif
 
 #if 0
 		if ( current.live_age >= 120 ) {
@@ -312,28 +203,22 @@ void main(void) {
 				current.wind_vane_adc
 			);
 #endif
-
-			fprintf(SERIAL_XTC,"# nmea_raw {triggered_age=%u '%s'}\r\n",
-				nmea_raw.triggered_age,
-				nmea_raw.buff
+			fprintf(SERIAL_XTC,"# current {gnss_age=%u gnss='%s'}\r\n",
+				current.gnss_age,
+				current.gnss_buff
 			);
-
 #if 0
-/* seems to be introducing jitter */
-			for ( i=0 ; i < NMEA0183_N_SENTENCE ; i++ ) {
-				fprintf(SERIAL_XTC,"# nmea_sentence[%u] id=%u valid=%u age=%u prefix='%s' '%s'\r\n",
-					i,
-					current.nmea_sentence[i].id,
-					nmea0183_is_valid(current.nmea_sentence[i].data),
-					current.nmea_sentence[i].age,
-					current.nmea_sentence[i].prefix,
-					current.nmea_sentence[i].data
-				);
-			}
+			fprintf(SERIAL_XTC,"# nmea_raw[0] {triggered_age=%u '%s'}\r\n",
+				nmea_raw.triggered_age[0],
+				nmea_raw.buff[0]
+			);
+			fprintf(SERIAL_XTC,"# nmea_raw[1] {triggered_age=%u '%s'}\r\n",
+				nmea_raw.triggered_age[1],
+				nmea_raw.buff[1]
+			);
 #endif
 
 			current.live_age=0;
-
 		}
 
 		/* periodic tasks */
@@ -341,28 +226,5 @@ void main(void) {
 			action.now_10millisecond=0;
 			task_10millisecond();
 		}
-
-
-
-#if 0
-		if ( kbhit(SERIAL_XTC) ) {
-			i=fgetc(SERIAL_XTC);
-			l++;
-
-			switch ( i ) {
-				case 'o': output_low(LED_ORANGE); break;
-				case 'O': output_high(LED_ORANGE); break;
-
-				case 'r': output_low(LED_RED); break;
-				case 'R': output_high(LED_RED); break;
-
-				case 'g': output_low(LED_GREEN); break;
-				case 'G': output_high(LED_GREEN); break;
-			}
-		}
-#endif
-
-
-
 	}
 }
