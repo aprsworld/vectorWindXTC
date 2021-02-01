@@ -126,6 +126,7 @@ void serial_isr_gnss(void) {
 				current.gnss_buff[c]=nmea_raw.buff[c];
 			}
 			current.gnss_buff[c]='\0';
+			current.gnss_length=pos;
 			
 			action.now_gnss_trigger_done=1;
 			state=GNSS_STATE_WAITING;

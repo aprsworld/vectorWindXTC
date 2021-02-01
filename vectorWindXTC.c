@@ -1,7 +1,7 @@
 #include "vectorWindXTC.h"
 
 #define SERIAL_PREFIX 'R'
-#define SERIAL_NUMBER 1036
+#define SERIAL_NUMBER 1037
 
 
 
@@ -23,12 +23,13 @@ typedef struct {
 	int16 input_voltage_adc;
 	int16 vertical_anemometer_adc;
 	int16 wind_vane_adc;
-	int16 uptime;
+	int16 sequence;
 
 	int8 live_age;
 
 	int8 gnss_age;
 	int8 gnss_buff[254];
+	int8 gnss_length;
 } struct_current;
 
 
@@ -65,6 +66,7 @@ struct_nmea_raw nmea_raw;
 
 #include "vectorWindXTC_adc.c"
 #include "vectorWindXTC_interrupts.c"
+#include "vectorWindXTC_live.c"
 
 
 void task_10millisecond(void) {
@@ -134,6 +136,12 @@ void init() {
 
 	nmea_raw.buff[0]='\0';
 	nmea_raw.pos=0;
+
+	current.gnss_age=255;;
+	current.gnss_buff[0]='\0';
+	current.gnss_length=0;
+	
+	current.sequence=0;
 }
 
 
@@ -161,12 +169,12 @@ void main(void) {
 		restart_wdt();
 
 
-#if 0
+#if 1
 		if ( current.live_age >= 120 ) {
 			/* didn't get a triger sentence from GNSS for last 1.2 seconds. Send data anyhow */
 			action.now_strobe_counters=1;    /* triggers strobe of data */
 			action.now_gnss_trigger_done=1;  /* triggers send of data */
-			fprintf(SERIAL_XTC,"# timeout waiting for trigger\r\n");
+//			fprintf(SERIAL_XTC,"# timeout waiting for trigger\r\n");
 		}
 #endif
 
@@ -177,46 +185,33 @@ void main(void) {
 
 			sample_adc();
 
-			fprintf(SERIAL_XTC,"# got trigger sentence\r\n");
+//			fprintf(SERIAL_XTC,"# got trigger sentence\r\n");
 		}	
 
 		/* as soon as interrupt finishes a $xxHDT we send our data */
 		if ( action.now_gnss_trigger_done) { 
 			action.now_gnss_trigger_done=0;
 
-#if 1
+#if 0
 			fprintf(SERIAL_XTC,"# finished receiving trigger sentence or timeout\r\n");
-		
 			fprintf(SERIAL_XTC,"# current.live_age=%u\r\n",current.live_age);
-#endif
-
 			fprintf(SERIAL_XTC,"# {count=%lu, period=%lu, min_period=%lu}\r\n",
 				current.strobed_pulse_count,
 				current.strobed_pulse_period,
 				current.strobed_pulse_min_period
 			);
-
-#if 1
 			fprintf(SERIAL_XTC,"# {input=%lu, vertical=%lu, wind_vane=%lu}\r\n",
 				current.input_voltage_adc,
 				current.vertical_anemometer_adc,
 				current.wind_vane_adc
 			);
-#endif
 			fprintf(SERIAL_XTC,"# current {gnss_age=%u gnss='%s'}\r\n",
 				current.gnss_age,
 				current.gnss_buff
 			);
-#if 0
-			fprintf(SERIAL_XTC,"# nmea_raw[0] {triggered_age=%u '%s'}\r\n",
-				nmea_raw.triggered_age[0],
-				nmea_raw.buff[0]
-			);
-			fprintf(SERIAL_XTC,"# nmea_raw[1] {triggered_age=%u '%s'}\r\n",
-				nmea_raw.triggered_age[1],
-				nmea_raw.buff[1]
-			);
 #endif
+
+			live_send();
 
 			current.live_age=0;
 		}
