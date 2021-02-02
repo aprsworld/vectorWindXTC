@@ -24,6 +24,7 @@ void live_send(void) {
 	int8 i;
 
 
+	packet_length=sizeof(buff) + current.gnss_length + 2;
 
 	buff[0]='#';
 	buff[1]=SERIAL_PREFIX;
