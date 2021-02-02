@@ -18,7 +18,7 @@ int16 crc_chk_seeded(int16 reg_crc, int8 *data, int8 length) {
 }
 
 void live_send(void) {
-	int8 buff[23];
+	int8 buff[24];
 	int16 packet_length;
 	int16 lCRC;
 	int8 i;
@@ -55,11 +55,14 @@ void live_send(void) {
 	buff[20]=make8(current.wind_vane_adc,1);
 	buff[21]=make8(current.wind_vane_adc,0);
 
+	/* meta data */
+	buff[22]=current.live_age;
+
 	/* NMEA data */
-	buff[22]=current.gnss_age;
+	buff[23]=current.gnss_age;
 
 	/* CRC of the first part of the packet */
-	lCRC=crc_chk_seeded(0xFFFF, buff+1, 22);
+	lCRC=crc_chk_seeded(0xFFFF, buff+1, 23);
 
 	/* CRC with the addition of the raw NMEA data */
 	lcrc = crc_chk_seeded(lCRC, current.gnss_buff, current.gnss_length);

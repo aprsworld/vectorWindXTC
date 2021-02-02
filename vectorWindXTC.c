@@ -156,7 +156,7 @@ void main(void) {
 	output_low(LED_GREEN);
 
 
-	fprintf(SERIAL_XTC,"# vectorWindXTC (%s) on XTC\r\n",__DATE__);
+//	fprintf(SERIAL_XTC,"# vectorWindXTC (%s) on XTC\r\n",__DATE__);
 
 	/* start 100uS timer */
 	enable_interrupts(INT_TIMER2);
