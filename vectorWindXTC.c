@@ -1,7 +1,7 @@
 #include "vectorWindXTC.h"
 
 #define SERIAL_PREFIX 'R'
-#define SERIAL_NUMBER 1040
+#define SERIAL_NUMBER 1036
 
 
 
