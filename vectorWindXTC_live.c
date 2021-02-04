@@ -32,7 +32,7 @@ void live_send(void) {
 	buff[3]=make8(SERIAL_NUMBER,0);
 	/* since packet length will exceed 254, we will use extended packet length in buff[6] and buff[7] */
 	buff[4]=0xff; /* packet length */
-	buff[5]=37; /* packet type */
+	buff[5]=38; /* packet type */
 	buff[6]=make8(packet_length,1);
 	buff[7]=make8(packet_length,0);
 
