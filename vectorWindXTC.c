@@ -1,8 +1,8 @@
 #include "vectorWindXTC.h"
 
 #define SERIAL_PREFIX   'R'
-#define SERIAL_NUMBER   1039
-#define LIVE_SLOT_DELAY 30   // milliseconds*10. Value 10=100 milliseconds
+#define SERIAL_NUMBER   1041
+#define LIVE_SLOT_DELAY 50   // milliseconds*10. Value 10=100 milliseconds
                              // 150 bytes of data with MT=3 takes ~75 ms
                              // so we will do 100 millisecond slots
                              // R1036=0, R1037=10, R1038=20, R1039=30, R1040=40, R1041=50
@@ -180,7 +180,7 @@ void main(void) {
 
 
 #if 0
-		if ( current.live_age >= 120 ) {
+		if ( current.live_age >= 120 && 0xff == current.live_countdown ) {
 			/* didn't get a triger sentence from GNSS for last 1.2 seconds. Send data anyhow */
 			action.now_strobe_counters=1;    /* triggers strobe of data */
 			action.now_gnss_trigger_done=1;  /* triggers send of data */
