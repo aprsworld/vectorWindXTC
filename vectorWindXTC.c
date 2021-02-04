@@ -1,8 +1,11 @@
 #include "vectorWindXTC.h"
 
-#define SERIAL_PREFIX 'R'
-#define SERIAL_NUMBER 1041
-
+#define SERIAL_PREFIX   'R'
+#define SERIAL_NUMBER   1039
+#define LIVE_SLOT_DELAY 30   // milliseconds*10. Value 10=100 milliseconds
+                             // 150 bytes of data with MT=3 takes ~75 ms
+                             // so we will do 100 millisecond slots
+                             // R1036=0, R1037=10, R1038=20, R1039=30, R1040=50, R1041=60
 
 
 
@@ -26,6 +29,7 @@ typedef struct {
 	int16 sequence;
 
 	int8 live_age;
+	int8 live_countdown;
 
 	int8 gnss_age;
 	int8 gnss_buff[254];
@@ -70,6 +74,10 @@ struct_nmea_raw nmea_raw;
 
 
 void task_10millisecond(void) {
+	if ( current.live_countdown > 0 && current.live_countdown != 0xff ) {
+		current.live_countdown--;
+	}
+
 	if ( current.gnss_age < 255 ) {
 		current.gnss_age++;
 	}
@@ -142,6 +150,8 @@ void init() {
 	current.gnss_length=0;
 	
 	current.sequence=0;
+
+	current.live_countdown=0xff;
 }
 
 
@@ -211,9 +221,14 @@ void main(void) {
 			);
 #endif
 
-			live_send();
+			current.live_countdown=LIVE_SLOT_DELAY;
 
+		}
+
+		if ( 0==current.live_countdown ) {
+			live_send();
 			current.live_age=0;
+			current.live_countdown=0xff;
 		}
 
 		/* periodic tasks */
