@@ -116,7 +116,7 @@ void serial_isr_gnss(void) {
 			current.gnss_age=0;
 			state=GNSS_STATE_IN;
 
-			output_toggle(LED_RED);
+//			output_toggle(LED_RED);
 		}
 	} else {
 		/* GNSS_STATE_IN */

@@ -1,8 +1,8 @@
 #include "vectorWindXTC.h"
 
 #define SERIAL_PREFIX   'R'
-#define SERIAL_NUMBER   1036
-#define LIVE_SLOT_DELAY 0    // milliseconds*10. Value 10=100 milliseconds
+#define SERIAL_NUMBER   1039
+#define LIVE_SLOT_DELAY 30   // milliseconds*10. Value 10=100 milliseconds
                              // 150 bytes of data with MT=3 takes ~75 ms
                              // so we will do 100 millisecond slots
                              // R1036=0, R1037=10, R1038=20, R1039=30, R1040=40, R1041=50
@@ -179,7 +179,7 @@ void main(void) {
 		restart_wdt();
 
 
-#if 1
+#if 0
 		if ( current.live_age >= 120 ) {
 			/* didn't get a triger sentence from GNSS for last 1.2 seconds. Send data anyhow */
 			action.now_strobe_counters=1;    /* triggers strobe of data */
@@ -198,9 +198,31 @@ void main(void) {
 //			fprintf(SERIAL_XTC,"# got trigger sentence\r\n");
 		}	
 
-		/* as soon as interrupt finishes a $xxHDT we send our data */
+		/* as soon as interrupt finishes a $xxHDT we are ready to send our data */
 		if ( action.now_gnss_trigger_done) { 
 			action.now_gnss_trigger_done=0;
+
+	output_toggle(LED_RED);
+			/* start a countdown for our slot for transmit */
+			current.live_countdown=LIVE_SLOT_DELAY;
+
+		}
+
+
+		if ( 0==current.live_countdown ) {
+		
+			live_send();
+			current.live_age=0;
+			current.live_countdown=0xff;
+		}
+
+		/* periodic tasks */
+		if  ( action.now_10millisecond ) {
+			action.now_10millisecond=0;
+			task_10millisecond();
+		}
+	}
+}
 
 #if 0
 			fprintf(SERIAL_XTC,"# finished receiving trigger sentence or timeout\r\n");
@@ -220,21 +242,3 @@ void main(void) {
 				current.gnss_buff
 			);
 #endif
-
-			current.live_countdown=LIVE_SLOT_DELAY;
-
-		}
-
-		if ( 0==current.live_countdown ) {
-			live_send();
-			current.live_age=0;
-			current.live_countdown=0xff;
-		}
-
-		/* periodic tasks */
-		if  ( action.now_10millisecond ) {
-			action.now_10millisecond=0;
-			task_10millisecond();
-		}
-	}
-}
