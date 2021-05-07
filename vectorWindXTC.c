@@ -1,7 +1,7 @@
 #include "vectorWindXTC.h"
 
 #define SERIAL_PREFIX   'R'
-#define SERIAL_NUMBER   1046
+#define SERIAL_NUMBER   1036
 #define LIVE_SLOT_DELAY 0    // milliseconds*10. Value 10=100 milliseconds
                              // 150 bytes of data with MT=3 takes ~75 ms
                              // so we will do 100 millisecond slots
